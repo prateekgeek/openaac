@@ -67,6 +67,8 @@
 
         function getLocalFallbackPhrases(wordsArray) {
           const normalized = wordsArray.map(w => w.toLowerCase());
+          const rawSentence = wordsArray.join(" ");
+          
           if (normalized.includes("want") && normalized.includes("eat")) {
             return ["I want something to eat.", "Can we eat food now?", "I am ready to eat lunch."];
           }
@@ -77,8 +79,8 @@
             return ["I want to go outside.", "Can we go home now?", "I want to leave."];
           }
           if (wordsArray.length > 0) {
-            const raw = wordsArray.join(" ");
-            return [`${raw} please.`, `I think I ${raw.toLowerCase()}.`, `Can we handle ${raw.toLowerCase()} now?`];
+            const cleanSentence = rawSentence.charAt(0).toUpperCase() + rawSentence.slice(1);
+            return [`${cleanSentence} please.`, `I think I ${rawSentence.toLowerCase()}.`, `Can we handle ${rawSentence.toLowerCase()} now?`];
           }
           return ["I want to go home.", "Can you help me please?", "I feel hungry."];
         }
@@ -155,6 +157,86 @@
             }
           }, []);
 
+          // ─── NEW: Hybrid Gemini Nano Predictive Translation Loop ───
+          const generateAIPhrases = useCallback(async () => {
+            if (selectedWords.length === 0) {
+              setAiOptions(getLocalFallbackPhrases([]));
+              return;
+            }
+
+            setAiLoading(true);
+            const targetString = selectedWords.join(" ");
+
+            try {
+              // 1. Core Native Intercept: Chrome Built-in AI Framework (Gemini Nano)
+              if (window.ai && window.ai.languageModel) {
+                const capabilities = await window.ai.languageModel.capabilities();
+                
+                if (capabilities.available !== "no") {
+                  const session = await window.ai.languageModel.create({
+                    systemPrompt: "You are an integrated AAC communication assistant. Transform vocabulary keyword arrays into exactly 3 short, natural full sentence options. Return response strictly as a raw JSON array of 3 strings. Do not include markdown formatting or backticks. Example: [\"Option one\", \"Option two\", \"Option three\"]"
+                  });
+
+                  const rawResult = await session.prompt(`Transform: ${targetString}`);
+                  session.destroy(); 
+
+                  const cleanJson = rawResult.replace(/```json|
+```/g, "").trim();
+                  const phrasesArray = JSON.parse(cleanJson);
+
+                  if (Array.isArray(phrasesArray) && phrasesArray.length >= 3) {
+                    setAiOptions(phrasesArray.slice(0, 3));
+                    setAiLoading(false);
+                    return; 
+                  }
+                }
+              }
+
+              // 2. Cloud Fallback Check: Individual Saved Keys Pipeline
+              if (isOnline && apiKey) {
+                const response = await fetch("https://api.anthropic.com/v1/messages", {
+                  method: "POST",
+                  headers: {
+                    "x-api-key": apiKey,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                    "anthropic-dangerous-direct-browser-access": "true"
+                  },
+                  body: JSON.stringify({
+                    model: "claude-3-5-sonnet-20241022",
+                    max_tokens: 150,
+                    system: "You are an integrated AAC communication module. Transform the provided vocabulary keyword arrays into exactly 3 natural speech options. Return code must be strictly a single raw valid JSON string array without markdown blocks. format: [\"Option One\", \"Option Two\", \"Option Three\"]",
+                    messages: [{ role: "user", content: `Transform: ${targetString}` }]
+                  })
+                });
+
+                if (response.ok) {
+                  const rawResult = await response.json();
+                  const phrasesArray = JSON.parse(rawResult.content[0].text.replace(/```json|```/g, "").trim());
+                  if (Array.isArray(phrasesArray)) {
+                    setAiOptions(phrasesArray.slice(0, 3));
+                    setAiLoading(false);
+                    return;
+                  }
+                }
+              }
+
+              // 3. Hardware Resilient Fallback: Run Local Algorithmic Patterns
+              setAiOptions(getLocalFallbackPhrases(selectedWords));
+
+            } catch (e) {
+              setAiOptions(getLocalFallbackPhrases(selectedWords));
+            } finally {
+              setAiLoading(false);
+            }
+          }, [selectedWords, isOnline, apiKey]);
+
+          // Trigger predictive calculation with a 450ms debounce
+          useEffect(() => {
+            const debouncer = setTimeout(generateAIPhrases, 450);
+            return () => clearTimeout(debouncer);
+          }, [selectedWords, generateAIPhrases]);
+
           return (
             <AACContext.Provider value={{
               boardData, selectedWords, isOnline, apiKey, aiOptions, addWord, clearWords,
@@ -182,11 +264,11 @@
         }
 
         function AIRibbon() {
-          const { aiOptions, speak } = useAAC();
+          const { aiOptions, speak, aiLoading } = useAAC();
           return (
             <div class="flex gap-2 overflow-x-auto py-1 w-full scrollbar-none shrink-0 min-h-[44px]">
               {aiOptions.map((phrase, i) => (
-                <button key={i} onClick={() => speak(phrase)} class="flex-1 min-w-0 px-4 py-2 rounded-full border border-[#DCCFB8] bg-white/75 backdrop-blur-sm text-[#2C1A00] text-xs font-bold truncate hover:bg-white text-left">
+                <button key={i} onClick={() => speak(phrase)} disabled={aiLoading} class={`flex-1 min-w-0 px-4 py-2 rounded-full border border-[#DCCFB8] bg-white/75 backdrop-blur-sm text-[#2C1A00] text-xs font-bold truncate hover:bg-white text-left ${aiLoading ? "opacity-50 animate-pulse" : ""}`}>
                   ✦ {phrase}
                 </button>
               ))}
