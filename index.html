@@ -157,7 +157,7 @@
             }
           }, []);
 
-          // ─── NEW: Hybrid Gemini Nano Predictive Translation Loop ───
+          // ─── Safely Structured Local AI & Fallback Routine ───
           const generateAIPhrases = useCallback(async () => {
             if (selectedWords.length === 0) {
               setAiOptions(getLocalFallbackPhrases([]));
@@ -168,17 +168,21 @@
             const targetString = selectedWords.join(" ");
 
             try {
-              // 1. Core Native Intercept: Chrome Built-in AI Framework (Gemini Nano)
-              if (window.ai && window.ai.languageModel) {
-                const capabilities = await window.ai.languageModel.capabilities();
+              // Check for newer languageModel api or classic textModel flag layout safely
+              const aiObject = window.ai?.languageModel || window.ai?.textModel || window.ai;
+              
+              if (aiObject && typeof aiObject.create === 'function') {
+                const capabilities = typeof aiObject.capabilities === 'function' 
+                  ? await aiObject.capabilities() 
+                  : { available: "yes" };
                 
                 if (capabilities.available !== "no") {
-                  const session = await window.ai.languageModel.create({
-                    systemPrompt: "You are an integrated AAC communication assistant. Transform vocabulary keyword arrays into exactly 3 short, natural full sentence options. Return response strictly as a raw JSON array of 3 strings. Do not include markdown formatting or backticks. Example: [\"Option one\", \"Option two\", \"Option three\"]"
+                  const session = await aiObject.create({
+                    systemPrompt: "You are an integrated AAC communication assistant. Transform vocabulary keyword arrays into exactly 3 short, natural full sentence options. Return response strictly as a raw JSON array of 3 strings. Do not include markdown formatting or backticks."
                   });
 
                   const rawResult = await session.prompt(`Transform: ${targetString}`);
-                  session.destroy(); 
+                  if (typeof session.destroy === 'function') session.destroy(); 
 
                   const cleanJson = rawResult.replace(/```json|
 ```/g, "").trim();
@@ -192,7 +196,7 @@
                 }
               }
 
-              // 2. Cloud Fallback Check: Individual Saved Keys Pipeline
+              // Claude proxy fallback if a user saved an external cloud key
               if (isOnline && apiKey) {
                 const response = await fetch("https://api.anthropic.com/v1/messages", {
                   method: "POST",
@@ -205,7 +209,7 @@
                   body: JSON.stringify({
                     model: "claude-3-5-sonnet-20241022",
                     max_tokens: 150,
-                    system: "You are an integrated AAC communication module. Transform the provided vocabulary keyword arrays into exactly 3 natural speech options. Return code must be strictly a single raw valid JSON string array without markdown blocks. format: [\"Option One\", \"Option Two\", \"Option Three\"]",
+                    system: "You are an integrated AAC communication module. Transform the words into a JSON array of 3 strings.",
                     messages: [{ role: "user", content: `Transform: ${targetString}` }]
                   })
                 });
@@ -221,7 +225,7 @@
                 }
               }
 
-              // 3. Hardware Resilient Fallback: Run Local Algorithmic Patterns
+              // Safe local operational fallback rule if no AI variables exist
               setAiOptions(getLocalFallbackPhrases(selectedWords));
 
             } catch (e) {
@@ -231,7 +235,6 @@
             }
           }, [selectedWords, isOnline, apiKey]);
 
-          // Trigger predictive calculation with a 450ms debounce
           useEffect(() => {
             const debouncer = setTimeout(generateAIPhrases, 450);
             return () => clearTimeout(debouncer);
@@ -250,7 +253,7 @@
         function useAAC() { return useContext(AACContext); }
 
         function SentenceBuffer() {
-          const { selectedWords, clearWords, speak, isSpeaking } = useAAC();
+          const { selectedWords, clearWords, speak } = useAAC();
           const fullSentence = selectedWords.join(" ");
           return (
             <div class="flex items-center gap-3 p-3 bg-white/85 rounded-2xl border-2 border-[#EADFCF] shadow-sm min-h-[56px] backdrop-blur-md w-full">
