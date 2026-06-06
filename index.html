@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OpenAAC Assistive Engine</title>
+    <!-- Tailwind CSS CDN for Premium UI styling -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- React and Babel CDNs to run modern component code inside the browser directly -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
+        html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', sans-serif; }
+        .scrollbar-none::-webkit-scrollbar { display: none; }
+        .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    </style>
+</head>
+<body class="bg-[#EDE3D5]">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, createContext, useContext, useRef } = React;
+
+        // ─── Fitzgerald Key Mapping Class Styles ────────────────────
+        const FK = {
+          pronoun: { bg: "bg-[#F5C842]", border: "border-[#D4A800]", text: "text-[#2C1A00]", shadow: "shadow-[rgba(212,168,0,0.35)]", active: "active:bg-[#D4A800]" },
+          verb:    { bg: "bg-[#4CAF72]", border: "border-[#2E7D50]", text: "text-[#0A2E16]", shadow: "shadow-[rgba(46,125,80,0.35)]", active: "active:bg-[#2E7D50]" },
+          noun:    { bg: "bg-[#F07C2A]", border: "border-[#C05A0A]", text: "text-[#2C1000]", shadow: "shadow-[rgba(192,90,10,0.35)]", active: "active:bg-[#C05A0A]" },
+          social:  { bg: "bg-[#E879B4]", border: "border-[#B5407E]", text: "text-[#2C0019]", shadow: "shadow-[rgba(181,64,126,0.35)]", active: "active:bg-[#B5407E]" },
+          action:  { bg: "bg-[#6BA8F5]", border: "border-[#2E6FD0]", text: "text-[#001633]", shadow: "shadow-[rgba(46,111,208,0.35)]", active: "active:bg-[#2E6FD0]" },
+        };
+
+        const DEFAULT_BOARD = {
+          id: "core-24-root",
+          name: "Default Core 24 Layout",
+          grid: { rows: 4, columns: 6 },
+          buttons: [
+            { id: "p1", label: "I",    value: "I",    type: "pronoun" },
+            { id: "p2", label: "You",  value: "you",  type: "pronoun" },
+            { id: "p3", label: "He",   value: "he",   type: "pronoun" },
+            { id: "p4", label: "She",  value: "she",  type: "pronoun" },
+            { id: "p5", label: "We",   value: "we",   type: "pronoun" },
+            { id: "p6", label: "They", value: "they", type: "pronoun" },
+            { id: "v1", label: "Want",  value: "want",  type: "verb" },
+            { id: "v2", label: "Go",    value: "go",    type: "verb" },
+            { id: "v3", label: "Like",  value: "like",  type: "verb" },
+            { id: "v4", label: "Need",  value: "need",  type: "verb" },
+            { id: "v5", label: "Feel",  value: "feel",  type: "verb" },
+            { id: "v6", label: "See",   value: "see",   type: "verb" },
+            { id: "n1", label: "Eat",   value: "eat",   type: "noun" },
+            { id: "n2", label: "Drink", value: "drink", type: "noun" },
+            { id: "n3", label: "Home",  value: "home",  type: "noun" },
+            { id: "n4", label: "Help",  value: "help",  type: "noun" },
+            { id: "n5", label: "More",  value: "more",  type: "noun" },
+            { id: "n6", label: "Time",  value: "time",  type: "noun" },
+            { id: "s1", label: "Yes",   value: "yes",   type: "social" },
+            { id: "s2", label: "No",    value: "no",    type: "social" },
+            { id: "s3", label: "Please",value: "please",type: "social" },
+            { id: "a1", label: "Stop",  value: "stop",  type: "action" },
+            { id: "a2", label: "Again", value: "again", type: "action" },
+            { id: "a3", label: "Good",  value: "good",  type: "action" },
+          ]
+        };
+
+        function getLocalFallbackPhrases(wordsArray) {
+          const normalized = wordsArray.map(w => w.toLowerCase());
+          if (normalized.includes("want") && normalized.includes("eat")) {
+            return ["I want something to eat.", "Can we eat food now?", "I am ready to eat lunch."];
+          }
+          if (normalized.includes("need") && normalized.includes("help")) {
+            return ["I need help right away.", "Can you please help me?", "I need assistance."];
+          }
+          if (normalized.includes("want") && normalized.includes("go")) {
+            return ["I want to go outside.", "Can we go home now?", "I want to leave."];
+          }
+          if (wordsArray.length > 0) {
+            const raw = wordsArray.join(" ");
+            return [`${raw} please.`, `I think I ${raw.toLowerCase()}.`, `Can we handle ${raw.toLowerCase()} now?`];
+          }
+          return ["I want to go home.", "Can you help me please?", "I feel hungry."];
+        }
+
+        function warmUpAudioEngine() {
+          if (!window.speechSynthesis) return;
+          window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+        }
+
+        function runNativeSpeech(text) {
+          if (!text.trim() || !window.speechSynthesis) return null;
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text.trim());
+          utterance.rate = 0.90;
+          const voices = window.speechSynthesis.getVoices();
+          const targetVoice = voices.find(v => v.lang.startsWith("en-")) || voices[0];
+          if (targetVoice) utterance.voice = targetVoice;
+          window.speechSynthesis.speak(utterance);
+          return utterance;
+        }
+
+        const AACContext = createContext(null);
+
+        function AACProvider({ children }) {
+          const [boardData, setBoardData] = useState(() => {
+            const savedBoard = localStorage.getItem("openaac_active_board");
+            return savedBoard ? JSON.parse(savedBoard) : DEFAULT_BOARD;
+          });
+          const [selectedWords, setSelectedWords] = useState([]);
+          const [isOnline, setIsOnline] = useState(navigator.onLine);
+          const [apiKey, setApiKey] = useState(() => localStorage.getItem("openaac_api_key") || "");
+          const [aiOptions, setAiOptions] = useState(() => getLocalFallbackPhrases([]));
+          const [isSpeaking, setIsSpeaking] = useState(false);
+          const [aiLoading, setAiLoading] = useState(false);
+          const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+          useEffect(() => {
+            const onlineHandler = () => setIsOnline(true);
+            const offlineHandler = () => setIsOnline(false);
+            window.addEventListener("online", onlineHandler);
+            window.addEventListener("offline", offlineHandler);
+            return () => {
+              window.removeEventListener("online", onlineHandler);
+              window.removeEventListener("offline", offlineHandler);
+            };
+          }, []);
+
+          const saveApiKey = (key) => {
+            const cleanKey = key.trim();
+            localStorage.setItem("openaac_api_key", cleanKey);
+            setApiKey(cleanKey);
+          };
+
+          const addWord = useCallback((word) => {
+            warmUpAudioEngine();
+            setSelectedWords(prev => [...prev, word]);
+          }, []);
+
+          const clearWords = useCallback(() => {
+            window.speechSynthesis?.cancel();
+            setSelectedWords([]);
+            setAiOptions(getLocalFallbackPhrases([]));
+          }, []);
+
+          const speak = useCallback((text) => {
+            warmUpAudioEngine();
+            setIsSpeaking(true);
+            const activeUtterance = runNativeSpeech(text);
+            if (activeUtterance) {
+              activeUtterance.onend = () => setIsSpeaking(false);
+              activeUtterance.onerror = () => setIsSpeaking(false);
+            } else {
+              setIsSpeaking(false);
+            }
+          }, []);
+
+          return (
+            <AACContext.Provider value={{
+              boardData, selectedWords, isOnline, apiKey, aiOptions, addWord, clearWords,
+              speak, isSpeaking, aiLoading, isSettingsOpen, setIsSettingsOpen, saveApiKey
+            }}>
+              {children}
+            </AACContext.Provider>
+          );
+        }
+
+        function useAAC() { return useContext(AACContext); }
+
+        function SentenceBuffer() {
+          const { selectedWords, clearWords, speak, isSpeaking } = useAAC();
+          const fullSentence = selectedWords.join(" ");
+          return (
+            <div class="flex items-center gap-3 p-3 bg-white/85 rounded-2xl border-2 border-[#EADFCF] shadow-sm min-h-[56px] backdrop-blur-md w-full">
+              <div class="flex-1 text-base font-semibold text-[#1A1208] truncate tracking-wide">
+                {fullSentence || <span class="text-[#C4B7A5] font-normal">Select vocabulary tracks...</span>}
+              </div>
+              <button onClick={clearWords} class="w-10 h-10 rounded-xl flex items-center justify-center font-bold bg-red-50 text-red-600 active:scale-95">✕</button>
+              <button onClick={() => fullSentence && speak(fullSentence)} class="h-10 px-5 rounded-xl flex items-center gap-2 font-bold text-xs tracking-wider bg-[#1A1208] text-white">SPEAK</button>
+            </div>
+          );
+        }
+
+        function AIRibbon() {
+          const { aiOptions, speak } = useAAC();
+          return (
+            <div class="flex gap-2 overflow-x-auto py-1 w-full scrollbar-none shrink-0 min-h-[44px]">
+              {aiOptions.map((phrase, i) => (
+                <button key={i} onClick={() => speak(phrase)} class="flex-1 min-w-0 px-4 py-2 rounded-full border border-[#DCCFB8] bg-white/75 backdrop-blur-sm text-[#2C1A00] text-xs font-bold truncate hover:bg-white text-left">
+                  ✦ {phrase}
+                </button>
+              ))}
+            </div>
+          );
+        }
+
+        function CommunicationGrid() {
+          const { boardData, addWord } = useAAC();
+          const { rows, columns } = boardData.grid;
+          return (
+            <div class="grid gap-2.5 w-full h-full p-3 box-border" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}>
+              {boardData.buttons.map((btn) => {
+                const styling = FK[btn.type] || FK.action;
+                return (
+                  <button key={btn.id} onClick={() => addWord(btn.value)} class={`w-full h-full flex flex-col items-center justify-center rounded-2xl border-2 p-2 gap-1 select-none transition-all transform active:translate-y-0.5 ${styling.bg} ${styling.border} ${styling.text} ${styling.shadow} ${styling.active}`}>
+                    <span class="text-sm font-extrabold tracking-tight">{btn.label}</span>
+                    <span class="text-[9px] font-medium tracking-widest uppercase opacity-30 font-mono">{btn.type}</span>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        }
+
+        function StatusBar() {
+          const { isOnline, boardData } = useAAC();
+          return (
+            <div class="flex items-center justify-between px-4 pt-2 pb-1 text-[10px] font-mono tracking-wider text-[#A89880] shrink-0 w-full select-none">
+              <div class="flex items-center gap-3">
+                <span class="font-bold text-[#7C6A55]">OpenAAC Engine v1.2</span>
+                <span class="text-[#1A1208] font-sans font-bold bg-[#EFEAE2] px-2 py-0.5 rounded-md border border-[#DCD3C4]">{boardData.name}</span>
+              </div>
+              <span class="flex items-center gap-1.5">
+                <span class={`w-2 h-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-rose-400"}`} />
+                {isOnline ? "Cloud Linked" : "Offline Core"}
+              </span>
+            </div>
+          );
+        }
+
+        function App() {
+          return (
+            <AACProvider>
+              <div class="w-screen h-screen overflow-hidden flex flex-col bg-gradient-to-b from-[#FBF7F1] via-[#F3EDE3] to-[#EDE3D5] relative antialiased select-none">
+                <StatusBar />
+                <div class="h-[25%] flex flex-col justify-end gap-2.5 px-3 pb-3 box-border shrink-0">
+                  <SentenceBuffer />
+                  <AIRibbon />
+                </div>
+                <div class="h-px mx-3 bg-gradient-to-r from-transparent via-[#DCCFB8]/50 to-transparent shrink-0" />
+                <div class="flex-1 overflow-hidden relative">
+                  <CommunicationGrid />
+                </div>
+              </div>
+            </AACProvider>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
